@@ -1,17 +1,25 @@
 // src/services/auth.ts
-import { auth, googleProvider } from "../lib/firebase"; // o "../lib/firebase" si no usas alias
 import {
   signInWithPopup,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   signOut,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
 } from "firebase/auth";
+import { auth, googleProvider } from "../lib/firebase";
 
-export const loginGoogle = () => signInWithPopup(auth, googleProvider);
-export const logout = () => signOut(auth);
+/** Configura la persistencia antes de un inicio de sesión */
+export async function setAuthPersistence(remember: boolean) {
+  await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+}
 
-export const signupEmail = (email: string, pass: string) =>
-  createUserWithEmailAndPassword(auth, email, pass);
+/** Login con Google respetando "Recordarme" */
+export async function loginGoogleWithRemember(remember: boolean) {
+  await setAuthPersistence(remember);
+  return signInWithPopup(auth, googleProvider);
+}
 
-export const loginEmail = (email: string, pass: string) =>
-  signInWithEmailAndPassword(auth, email, pass);
+/** Cerrar sesión */
+export function logout() {
+  return signOut(auth);
+}

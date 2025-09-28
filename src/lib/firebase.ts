@@ -1,7 +1,15 @@
 // src/lib/firebase.ts
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getAnalytics, isSupported as analyticsSupported } from "firebase/analytics";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  setPersistence,
+  browserLocalPersistence,
+} from "firebase/auth";
+import {
+  getAnalytics,
+  isSupported as analyticsSupported,
+} from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
 // import { getStorage } from "firebase/storage"; // si lo necesitas
 
@@ -20,6 +28,11 @@ export const app = initializeApp(firebaseConfig);
 // Auth
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+// 🔒 Configurar persistencia: mantiene la sesión activa aunque recargues
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.error("Error al configurar persistencia de sesión:", err);
+});
 
 // Firestore
 export const db = getFirestore(app);

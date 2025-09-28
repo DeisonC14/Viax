@@ -1,30 +1,27 @@
-<<<<<<< HEAD
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import App from "./App";
-=======
 // src/main.tsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
-import Login from "./pages/login"; 
->>>>>>> 1b20a19 (registro)
+import Login from "./pages/login"; // asegúrate de que el archivo exista en src/pages/Login.tsx
+import Registro from "./pages/Registro"; // asegúrate de que el archivo exista en src/pages/Registro.tsx
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-<<<<<<< HEAD
-      <App />
-=======
       <Routes>
+        {/* Home / Bienvenida */}
         <Route path="/" element={<App />} />
+
+        {/* Login */}
         <Route path="/login" element={<Login />} />
+        {/* Registro */}
+        <Route path="/registro" element={<Registro />} />
+
+        {/* Cualquier otra ruta redirige a home */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
->>>>>>> 1b20a19 (registro)
     </BrowserRouter>
   </React.StrictMode>
 );
