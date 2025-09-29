@@ -1,21 +1,40 @@
 // src/pages/Login.tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { loginGoogleWithRemember } from "../services/auth";
 import { sendLoginCodeWithRemember, confirmLoginCode } from "../services/phone";
 import type { ConfirmationResult } from "firebase/auth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+import { auth, db } from "../lib/firebase";
+import type { Role } from "../hooks/useAuth";
+import { setAuthPersistence } from "../services/auth";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default function Login() {
-  const { loading } = useAuth();
-  const [telefono, setTelefono] = useState("");                 // +57XXXXXXXXXX
-  const [code, setCode] = useState("");                         // Código SMS
+  const { loading, user, role, signInWithGoogle, refreshClaims } = useAuth();
+
+  const [telefono, setTelefono] = useState("");
+  const [code, setCode] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
-  const [step, setStep] = useState<"phone" | "code">("phone");  // Paso actual
-  const [remember, setRemember] = useState(true);               // ✅ Recordarme
+  const [step, setStep] = useState<"phone" | "code">("phone");
+  const [remember, setRemember] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // /login?switch=1  => evita auto-redirección si vienes desde Home
+  const forceSwitch = new URLSearchParams(location.search).get("switch") === "1";
+
+  const goToRole = (r: Role) => {
+    if (r === "superadmin") navigate("/superadmin", { replace: true });
+    else if (r === "admin") navigate("/admin", { replace: true });
+    else navigate("/", { replace: true });
+  };
+
+  useEffect(() => {
+    if (forceSwitch) return;
+    if (!loading && user && role) goToRole(role);
+  }, [loading, user, role, forceSwitch, navigate]);
 
   if (loading) {
     return (
@@ -25,7 +44,7 @@ export default function Login() {
     );
   }
 
-  // Botón principal: si estás en "phone" envía el SMS; si estás en "code" confirma
+  // Enviar SMS / Confirmar código
   const onPrimary = async () => {
     if (step === "phone") {
       try {
@@ -39,7 +58,8 @@ export default function Login() {
         setConfirmation(c);
         setStep("code");
       } catch (e: any) {
-        switch (e.code) {
+        console.error("SMS error:", e);
+        switch (e?.code) {
           case "auth/invalid-phone-number":
             setErr("Número inválido. Usa el formato +573001234567.");
             break;
@@ -63,10 +83,45 @@ export default function Login() {
       try {
         setErr(null);
         setBusy(true);
+
+        // 1) Confirma el código (loguea al usuario)
         await confirmLoginCode(confirmation, code);
-        navigate("/", { replace: true });
+
+        // 2) Refresca claims
+        await refreshClaims();
+
+        // 3) Espeja/actualiza doc del usuario (sin tocar 'role')
+        const u = auth.currentUser;
+        if (u) {
+          await setDoc(
+            doc(db, "users", u.uid),
+            {
+              uid: u.uid,
+              displayName: u.displayName ?? "",
+              email: u.email ?? "",
+              phone: telefono || u.phoneNumber || "",
+              lastLoginAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        // 4) Redirección inmediata si venías con switch=1
+        if (forceSwitch) {
+          const token = await auth.currentUser?.getIdTokenResult(false);
+          const r = (token?.claims.role as Role) ?? "cliente";
+          goToRole(r);
+        }
+        // Si no, el useEffect hará la redirección
       } catch (e: any) {
-        switch (e.code) {
+        console.error("Confirm code error:", e);
+        const codeErr = e?.code as string | undefined;
+        if (codeErr === "auth/user-disabled") {
+          // Usuario bloqueado: redirigir a pantalla informativa
+          navigate("/bloqueado", { replace: true });
+          return;
+        }
+        switch (codeErr) {
           case "auth/invalid-verification-code":
             setErr("Código inválido. Verifica e inténtalo de nuevo.");
             break;
@@ -85,14 +140,45 @@ export default function Login() {
     }
   };
 
+  // Google Sign-In
   const onLoginWithGoogle = async () => {
     try {
       setErr(null);
       setBusy(true);
-      await loginGoogleWithRemember(remember);
-      navigate("/", { replace: true });
-    } catch {
-      setErr("No se pudo iniciar con Google");
+
+      // Persistencia según "Recordarme"
+      await setAuthPersistence(remember);
+
+      // El hook ya hace signIn + refreshClaims + espejo en users/{uid}
+      await signInWithGoogle();
+
+      // Redirecciona por rol
+      const token = await auth.currentUser?.getIdTokenResult(false);
+      const r = (token?.claims.role as Role) ?? "cliente";
+      goToRole(r);
+    } catch (e: any) {
+      console.error("Google sign-in error:", e);
+      const codeErr = e?.code as string | undefined;
+      if (codeErr === "auth/user-disabled") {
+        navigate("/bloqueado", { replace: true });
+        return;
+      }
+      switch (codeErr) {
+        case "auth/operation-not-allowed":
+          setErr("Google no está habilitado (Authentication → Métodos de acceso).");
+          break;
+        case "auth/unauthorized-domain":
+          setErr("Dominio no autorizado. Agrega tu dominio en Authentication → Configuración → Dominios autorizados.");
+          break;
+        case "auth/popup-blocked":
+          setErr("El navegador bloqueó la ventana. Permite popups y vuelve a intentar.");
+          break;
+        case "auth/popup-closed-by-user":
+          setErr("Cerraste la ventana de Google antes de completar el inicio.");
+          break;
+        default:
+          setErr("No se pudo iniciar con Google");
+      }
     } finally {
       setBusy(false);
     }
@@ -120,7 +206,7 @@ export default function Login() {
           "
         />
 
-        {/* Card glassmorphism (tus estilos intactos) */}
+        {/* Card glassmorphism */}
         <div
           className="
             w-full min-h-[32rem]
@@ -135,7 +221,7 @@ export default function Login() {
             Iniciar sesión
           </h2>
 
-          {/* Zona de error con altura mínima para evitar que el botón cambie de tamaño */}
+          {/* Zona de error */}
           <div className="min-h-[20px] mb-2">
             {err && <p className="text-red-400 text-sm">{err}</p>}
           </div>
@@ -167,7 +253,6 @@ export default function Login() {
                 placeholder={step === "phone" ? "— Se enviará al solicitar —" : "123456"}
                 disabled={step === "phone"}
               />
-              {/* Mantengo tu “espaciador” para no alterar layout */}
               <span className="absolute inset-y-0 right-2 flex items-center text-transparent select-none">•</span>
             </div>
           </div>
@@ -183,7 +268,7 @@ export default function Login() {
             Recordarme en este dispositivo
           </label>
 
-          {/* Botón principal (mismos estilos) */}
+          {/* Botón principal (SMS) */}
           <button
             onClick={onPrimary}
             disabled={busy}
@@ -193,7 +278,7 @@ export default function Login() {
             {step === "phone" ? (busy ? "Enviando…" : "Iniciar sesión") : (busy ? "Verificando…" : "Iniciar sesión")}
           </button>
 
-          {/* Botón Google: solo icono circular (tus estilos intactos) */}
+          {/* Botón Google */}
           <button
             onClick={onLoginWithGoogle}
             aria-label="Continuar con Google"
@@ -205,10 +290,7 @@ export default function Login() {
 
           <p className="mt-6 text-center text-sm text-gray-200">
             ¿No tienes cuenta?{" "}
-            <button
-              onClick={() => navigate("/registro")}
-              className="text-[#74F28C] font-semibold hover:underline"
-            >
+            <button onClick={() => navigate("/registro")} className="text-[#74F28C] font-semibold hover:underline">
               Crear cuenta
             </button>
           </p>
